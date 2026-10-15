@@ -6,30 +6,37 @@
 #include <SDL3/SDL_surface.h>
 #include <cstdint>
 #include <cstdlib>
+#include <chrono>
 
 constexpr int WIDTH = 1024;
 constexpr int HEIGHT = 768;
 constexpr const char *TITLE = "Pixel simulator engine";
+constexpr double FIXED_SIMULATION_DELTA = 1.0 / 80.0;
 
 struct Cell {
-  bool was_updated_this_iteration;
+bool was_updated_this_iteration;
 
 public:
   Cell() { was_updated_this_iteration = false; }
 };
 
+double get_current_time() {
+  using namespace std::chrono;
+  return duration<double>(steady_clock::now().time_since_epoch()).count();
+}
+
 uint32_t *init_pixels() {
   uint32_t *pixels =
       static_cast<uint32_t *>(malloc(WIDTH * HEIGHT * sizeof(uint32_t)));
 
-  for (uint32_t i = 0; i < WIDTH * HEIGHT; i++) {
+  for (size_t i{}; i < WIDTH * HEIGHT; i++) {
     pixels[i] = 0xFFFFFFFF;
   }
   return pixels;
 }
 
 void update_pixels(Cell *cells, uint32_t *pixels) {
-  for (int i = 0; i < (WIDTH - 1) * HEIGHT; i++) {
+    for (size_t i{}; i < WIDTH * (HEIGHT - 1); i++) {
     if (!cells[i].was_updated_this_iteration) {
       if (pixels[i] != 0xFFFFFFFF && pixels[i + WIDTH] == 0xFFFFFFFF) {
         pixels[i + WIDTH] = pixels[i];
@@ -79,7 +86,13 @@ int main() {
 
   bool running = true;
 
+  double previous_frame_timestamp = get_current_time();
+  double time_accumulator = 0.0;
   while (running) {
+    const double current_frame_timestamp = get_current_time();
+    time_accumulator += current_frame_timestamp - previous_frame_timestamp;
+    previous_frame_timestamp = current_frame_timestamp;
+
     SDL_Event event;
 
     while (SDL_PollEvent(&event)) {
@@ -88,13 +101,19 @@ int main() {
         running = false;
       }
       if (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN) {
-        int x = (int)event.button.x;
-        int y = (int)event.button.y;
+        const int x = static_cast<int>(event.button.x);
+        const int y = static_cast<int>(event.button.y);
 
         if (x >= 0 && x < WIDTH && y >= 0 && y < HEIGHT) {
           pixels[y * WIDTH + x] = 0x000000FF;
         }
       }
+    }
+
+    while (time_accumulator >= FIXED_SIMULATION_DELTA) {
+      reset_cell_update_state(cells);
+      update_pixels(cells, pixels);
+      time_accumulator -= FIXED_SIMULATION_DELTA;
     }
 
     SDL_SetTextureScaleMode(texture, SDL_SCALEMODE_NEAREST);
@@ -103,9 +122,6 @@ int main() {
     SDL_RenderTexture(renderer, texture, nullptr, nullptr);
     SDL_RenderPresent(renderer); // needed for wayland
 
-    SDL_Delay(16);
-    update_pixels(cells,pixels);
-    reset_cell_update_state(cells);
   }
   SDL_DestroyTexture(texture);
   SDL_DestroyRenderer(renderer);
