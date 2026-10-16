@@ -4,20 +4,50 @@
 #include <SDL3/SDL_pixels.h>
 #include <SDL3/SDL_render.h>
 #include <SDL3/SDL_surface.h>
+#include <chrono>
 #include <cstdint>
 #include <cstdlib>
-#include <chrono>
+#include <memory>
+#include <utility>
 
 constexpr int WIDTH = 1024;
 constexpr int HEIGHT = 768;
 constexpr const char *TITLE = "Pixel simulator engine";
-constexpr double FIXED_SIMULATION_DELTA = 1.0 / 80.0;
+constexpr double FIXED_SIMULATION_DELTA = 1.0 / 60.0;
+
+enum MaterialKind { EMPTY, SAND };
+
+class Material {
+public:
+  virtual ~Material() = default;
+  virtual MaterialKind materialKind() const = 0;
+  virtual uint32_t getColor() const = 0;
+  virtual double getDensity() const = 0;
+  bool canDisplace(Material &m) {
+    return getDensity() > m.getDensity();
+  };
+};
+
+class Air : public Material {
+public:
+  MaterialKind materialKind() const override { return MaterialKind::EMPTY; }
+  uint32_t getColor() const override { return 0x00000000; }
+  double getDensity() const override { return 0; }
+};
+
+class Sand : public Material {
+public:
+  MaterialKind materialKind() const override { return MaterialKind::SAND; }
+  uint32_t getColor() const override { return 0xF5EB27FF; }
+  double getDensity() const override { return 0; }
+};
 
 struct Cell {
-bool was_updated_this_iteration;
+  bool was_updated_this_iteration = false;
+  std::unique_ptr<Material> material;
 
-public:
-  Cell() { was_updated_this_iteration = false; }
+  Cell() : material(std::make_unique<Air>()) {}
+  explicit Cell(std::unique_ptr<Material> m) : material(std::move(m)) {}
 };
 
 double get_current_time() {
@@ -35,16 +65,25 @@ uint32_t *init_pixels() {
   return pixels;
 }
 
-void update_pixels(Cell *cells, uint32_t *pixels) {
-    for (size_t i{}; i < WIDTH * (HEIGHT - 1); i++) {
-    if (!cells[i].was_updated_this_iteration) {
-      if (pixels[i] != 0xFFFFFFFF && pixels[i + WIDTH] == 0xFFFFFFFF) {
-        pixels[i + WIDTH] = pixels[i];
-        pixels[i] = 0xFFFFFFFF;
+bool gravity_applies(Cell *cell) {
+  if (cell->material->materialKind() == MaterialKind::SAND) {
+    return 1;
+  }
+  return 0;
+}
 
-        cells[i].was_updated_this_iteration = true;
-        cells[i+WIDTH].was_updated_this_iteration = true;
+void update_pixels(Cell *cells, uint32_t *pixels) {
+  for (size_t i{WIDTH * HEIGHT - WIDTH}; i-- > 0;) {
+    if (cells[i].material->materialKind() != MaterialKind::EMPTY &&
+        !cells[i].was_updated_this_iteration) {
+      if (cells[i + 1].material->materialKind() == MaterialKind::EMPTY) {
+        if (gravity_applies(&cells[i])) {
+          pixels[i + WIDTH] = pixels[i];
+          pixels[i] = 0xFFFFFFFF;
+          std::swap(cells[i + WIDTH], cells[i]);
+        }
       }
+      cells[i + WIDTH].was_updated_this_iteration = true;
     }
   }
 }
@@ -121,7 +160,6 @@ int main() {
     SDL_RenderClear(renderer);
     SDL_RenderTexture(renderer, texture, nullptr, nullptr);
     SDL_RenderPresent(renderer); // needed for wayland
-
   }
   SDL_DestroyTexture(texture);
   SDL_DestroyRenderer(renderer);
