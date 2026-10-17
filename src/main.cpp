@@ -15,7 +15,7 @@ constexpr int HEIGHT = 768;
 constexpr const char *TITLE = "Pixel simulator engine";
 constexpr double FIXED_SIMULATION_DELTA = 1.0 / 60.0;
 
-enum MaterialKind { EMPTY, SAND };
+enum MaterialKind { AIR, SAND };
 
 class Material {
 public:
@@ -30,16 +30,16 @@ public:
 
 class Air : public Material {
 public:
-  MaterialKind materialKind() const override { return MaterialKind::EMPTY; }
+  MaterialKind materialKind() const override { return MaterialKind::AIR; }
   uint32_t getColor() const override { return 0x00000000; }
-  double getDensity() const override { return 0; }
+  double getDensity() const override { return 0.2; }
 };
 
 class Sand : public Material {
 public:
   MaterialKind materialKind() const override { return MaterialKind::SAND; }
   uint32_t getColor() const override { return 0xF5EB27FF; }
-  double getDensity() const override { return 0; }
+  double getDensity() const override { return 1; }
 };
 
 struct Cell {
@@ -65,25 +65,15 @@ uint32_t *init_pixels() {
   return pixels;
 }
 
-bool gravity_applies(Cell *cell) {
-  if (cell->material->materialKind() == MaterialKind::SAND) {
-    return 1;
-  }
-  return 0;
-}
-
-void update_pixels(Cell *cells, uint32_t *pixels) {
-  for (size_t i{WIDTH * HEIGHT - WIDTH}; i-- > 0;) {
-    if (cells[i].material->materialKind() != MaterialKind::EMPTY &&
+void update_cells(Cell *cells) {
+  for (size_t i{WIDTH * HEIGHT - WIDTH}; i--> 0;) {
+    if (cells[i].material->materialKind() != MaterialKind::AIR &&
         !cells[i].was_updated_this_iteration) {
-      if (cells[i + 1].material->materialKind() == MaterialKind::EMPTY) {
-        if (gravity_applies(&cells[i])) {
-          pixels[i + WIDTH] = pixels[i];
-          pixels[i] = 0xFFFFFFFF;
+        if (cells[i].material->canDisplace(*cells[i+WIDTH].material)) {
           std::swap(cells[i + WIDTH], cells[i]);
         }
-      }
       cells[i + WIDTH].was_updated_this_iteration = true;
+      cells[i].was_updated_this_iteration = true;
     }
   }
 }
@@ -92,6 +82,13 @@ void reset_cell_update_state(Cell *cells) {
   for (int i = 0; i < WIDTH * HEIGHT; i++) {
     cells[i].was_updated_this_iteration = false;
   }
+}
+
+uint32_t* update_pixels(Cell *cells, uint32_t *pixels) {
+  for (size_t i{}; i < WIDTH * HEIGHT; i++) {
+    pixels[i] = cells[i].material->getColor(); 
+  }
+  return pixels;
 }
 
 int main() {
@@ -144,13 +141,14 @@ int main() {
         const int y = static_cast<int>(event.button.y);
 
         if (x >= 0 && x < WIDTH && y >= 0 && y < HEIGHT) {
-          pixels[y * WIDTH + x] = 0x000000FF;
+          cells[y * WIDTH + x].material = std::make_unique<Sand>();
         }
       }
     }
 
     while (time_accumulator >= FIXED_SIMULATION_DELTA) {
       reset_cell_update_state(cells);
+      update_cells(cells);
       update_pixels(cells, pixels);
       time_accumulator -= FIXED_SIMULATION_DELTA;
     }
